@@ -73,8 +73,10 @@ impl StrategyManager {
         let mut cargo_toml: DocumentMut = MEMBER_CARGO_TOML.parse()?;
         cargo_toml["package"]["name"] = value(strategy_name);
 
-        cargo_toml["dependencies"]["merco"] =
-            value(format!("{{ path = \"{}\" }}", env!("CARGO_MANIFEST_DIR")));
+        let dependency_merco = cargo_toml["dependencies"]["merco"]
+            .as_inline_table_mut()
+            .unwrap();
+        dependency_merco.insert("path", env!("CARGO_MANIFEST_DIR").into());
 
         let cargo_path = strategy_dir.join("Cargo.toml");
         fs::write(cargo_path, cargo_toml.to_string())?;
