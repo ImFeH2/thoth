@@ -1,7 +1,6 @@
 use crate::errors::{AppError, AppResult};
 use crate::models::{Candle, MarketPrecision, TradingFees};
-use crate::utils::{round_down_to_precision, round_up_to_precision};
-use bigdecimal::{BigDecimal, Zero};
+use bigdecimal::{BigDecimal, RoundingMode, Zero};
 use chrono::{DateTime, Utc, serde::ts_milliseconds};
 use serde::Serialize;
 use ts_rs::TS;
@@ -30,6 +29,8 @@ pub struct Trade {
     pub amount: BigDecimal,
     #[ts(type = "string")]
     pub fee: BigDecimal,
+    #[ts(optional, type = "string")]
+    pub profit: Option<BigDecimal>,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -61,10 +62,14 @@ pub struct StrategyContext {
 }
 
 impl StrategyContext {
-    pub(crate) fn new(fees: TradingFees, precision: MarketPrecision) -> AppResult<Self> {
+    pub(crate) fn new(
+        balance: BigDecimal,
+        fees: TradingFees,
+        precision: MarketPrecision,
+    ) -> AppResult<Self> {
         Ok(Self {
             candles: Vec::new(),
-            balance: BigDecimal::from(10000),
+            balance,
             position: BigDecimal::zero(),
             trades: Vec::new(),
             orders: Vec::new(),
@@ -74,47 +79,47 @@ impl StrategyContext {
     }
 
     pub(crate) fn before(&mut self) -> AppResult<()> {
-        let candle = self
-            .candles
-            .last()
-            .ok_or(AppError::Strategy("No candles available".into()))?;
+        let candle = self.candle()?;
+        let mut orders_to_execute = Vec::new();
 
-        let mut executed_orders = Vec::new();
         for order in &self.orders {
             match order.order_type {
                 OrderType::LimitBuy => {
                     if order.price >= candle.low {
-                        self.position += &order.amount;
-                        self.trades.push(Trade {
-                            timestamp: candle.timestamp,
-                            trade_type: TradeType::LimitBuy,
-                            price: order.price.clone(),
-                            amount: order.amount.clone(),
-                            fee: order.fee.clone(),
-                        });
-                        executed_orders.push(order.id);
+                        orders_to_execute.push((
+                            order.id,
+                            OrderType::LimitBuy,
+                            order.price.clone(),
+                            order.amount.clone(),
+                            order.fee.clone(),
+                        ));
                     }
                 }
                 OrderType::LimitSell => {
                     if order.price <= candle.high {
-                        let proceeds = &order.price * &order.amount;
-                        let fee = &order.fee;
-                        self.balance += &proceeds - fee;
-                        self.trades.push(Trade {
-                            timestamp: candle.timestamp,
-                            trade_type: TradeType::LimitSell,
-                            price: order.price.clone(),
-                            amount: order.amount.clone(),
-                            fee: order.fee.clone(),
-                        });
-                        executed_orders.push(order.id);
+                        orders_to_execute.push((
+                            order.id,
+                            OrderType::LimitSell,
+                            order.price.clone(),
+                            order.amount.clone(),
+                            order.fee.clone(),
+                        ));
                     }
                 }
             }
         }
 
-        self.orders
-            .retain(|order| !executed_orders.contains(&order.id));
+        for (order_id, order_type, price, amount, fee) in orders_to_execute {
+            match order_type {
+                OrderType::LimitBuy => {
+                    self.execute_limit_buy(&candle, &price, &amount, &fee);
+                }
+                OrderType::LimitSell => {
+                    self.execute_limit_sell(&candle, &price, &amount, &fee);
+                }
+            }
+            self.orders.retain(|o| o.id != order_id);
+        }
 
         Ok(())
     }
@@ -128,7 +133,6 @@ impl StrategyContext {
         for id in order_ids {
             self.cancel_order(id);
         }
-
         Ok(())
     }
 
@@ -136,9 +140,10 @@ impl StrategyContext {
         &self.candles
     }
 
-    pub fn candle(&self) -> AppResult<&Candle> {
+    pub fn candle(&self) -> AppResult<Candle> {
         self.candles
             .last()
+            .cloned()
             .ok_or(AppError::Strategy("No candles available".into()))
     }
 
@@ -172,6 +177,7 @@ impl StrategyContext {
                 }
                 OrderType::LimitSell => {
                     self.position += &order.amount;
+                    self.balance += &order.fee;
                 }
             }
             self.orders.remove(pos);
@@ -179,21 +185,18 @@ impl StrategyContext {
     }
 
     pub fn market_buy(&mut self, amount: &BigDecimal) -> AppResult<()> {
-        let amount = round_down_to_precision(amount, &self.precision.amount_precision);
+        let amount = self.precision.round_amount(amount, RoundingMode::Down);
+
         if amount <= BigDecimal::zero() {
             return Err(AppError::Strategy("Amount must be positive".into()));
         }
 
-        let candle = self
-            .candles
-            .last()
-            .ok_or(AppError::Strategy("No candles available".into()))?;
-        let price = round_down_to_precision(&candle.close, &self.precision.price_precision);
-        let timestamp = candle.timestamp;
+        let candle = self.candle()?;
+        let price = candle.close;
 
         let cost = &price * &amount;
-        let fee =
-            round_up_to_precision(&(&cost * &self.fees.taker), &self.precision.price_precision);
+        let fee = &cost * &self.fees.taker;
+        let fee = self.precision.round_amount(&fee, RoundingMode::Up);
         let total = &cost + &fee;
 
         if total > self.balance {
@@ -204,49 +207,53 @@ impl StrategyContext {
         self.position += &amount;
 
         self.trades.push(Trade {
-            timestamp,
+            timestamp: candle.timestamp,
             trade_type: TradeType::MarketBuy,
             price,
             amount,
             fee,
+            profit: None,
         });
 
         Ok(())
     }
 
     pub fn market_sell(&mut self, amount: &BigDecimal) -> AppResult<()> {
-        let amount = round_down_to_precision(amount, &self.precision.amount_precision);
+        let amount = self.precision.round_amount(amount, RoundingMode::Down);
+
         if amount <= BigDecimal::zero() {
             return Err(AppError::Strategy("Amount must be positive".into()));
         }
+
         if amount > self.position {
             return Err(AppError::Strategy(
                 "Insufficient base asset amount to sell".into(),
             ));
         }
 
-        let candle = self
-            .candles
-            .last()
-            .ok_or(AppError::Strategy("No candles available".into()))?;
-        let price = round_down_to_precision(&candle.close, &self.precision.price_precision);
-        let timestamp = candle.timestamp;
+        let candle = self.candle()?;
+        let price = candle.close;
 
         let proceeds = &price * &amount;
-        let fee = round_up_to_precision(
-            &(&proceeds * &self.fees.taker),
-            &self.precision.price_precision,
-        );
+        let fee = self
+            .precision
+            .round_amount(&(&proceeds * &self.fees.taker), RoundingMode::Up);
+        let revenue = &proceeds - &fee;
+
+        if revenue < BigDecimal::zero() {
+            return Err(AppError::Strategy("Revenue cannot be negative".into()));
+        }
 
         self.position -= &amount;
-        self.balance += &proceeds - &fee;
+        self.balance += &revenue;
 
         self.trades.push(Trade {
-            timestamp,
+            timestamp: candle.timestamp,
             trade_type: TradeType::MarketSell,
             price,
             amount,
             fee,
+            profit: None,
         });
 
         Ok(())
@@ -257,17 +264,14 @@ impl StrategyContext {
         price: &BigDecimal,
         amount: &BigDecimal,
     ) -> AppResult<Option<Uuid>> {
-        let price = round_down_to_precision(price, &self.precision.price_precision);
-        let amount = round_down_to_precision(amount, &self.precision.amount_precision);
+        let price = self.precision.round_amount(price, RoundingMode::Down);
+        let amount = self.precision.round_amount(amount, RoundingMode::Down);
 
         if amount <= BigDecimal::zero() {
             return Err(AppError::Strategy("Amount must be positive".into()));
         }
 
-        let candle = self
-            .candles
-            .last()
-            .ok_or(AppError::Strategy("No candles available".into()))?;
+        let candle = self.candle()?;
 
         if price >= candle.close {
             self.market_buy(&amount)?;
@@ -275,10 +279,10 @@ impl StrategyContext {
         };
 
         let cost = &amount * &price;
-        let fee =
-            round_up_to_precision(&(&cost * &self.fees.maker), &self.precision.price_precision);
-
+        let fee = &cost * &self.fees.maker;
+        let fee = self.precision.round_amount(&fee, RoundingMode::Up);
         let total = &cost + &fee;
+
         if total > self.balance {
             return Err(AppError::Strategy("Insufficient funds".into()));
         }
@@ -302,8 +306,8 @@ impl StrategyContext {
         price: &BigDecimal,
         amount: &BigDecimal,
     ) -> AppResult<Option<Uuid>> {
-        let price = round_down_to_precision(price, &self.precision.price_precision);
-        let amount = round_down_to_precision(amount, &self.precision.amount_precision);
+        let price = self.precision.round_amount(price, RoundingMode::Down);
+        let amount = self.precision.round_amount(amount, RoundingMode::Down);
 
         if amount <= BigDecimal::zero() {
             return Err(AppError::Strategy("Amount must be positive".into()));
@@ -315,22 +319,23 @@ impl StrategyContext {
             ));
         }
 
-        let candle = self
-            .candles
-            .last()
-            .ok_or(AppError::Strategy("No candles available".into()))?;
-
+        let candle = self.candle()?;
         if price <= candle.close {
             self.market_sell(&amount)?;
             return Ok(None);
         };
 
         let proceeds = &price * &amount;
-        let fee = round_up_to_precision(
-            &(&proceeds * &self.fees.maker),
-            &self.precision.price_precision,
-        );
+        let fee = self
+            .precision
+            .round_amount(&(&proceeds * &self.fees.maker), RoundingMode::Up);
+
+        if fee > self.balance {
+            return Err(AppError::Strategy("Insufficient funds to cover fee".into()));
+        }
+
         self.position -= &amount;
+        self.balance -= &fee;
 
         let order_id = Uuid::new_v4();
         self.orders.push(Order {
@@ -342,5 +347,48 @@ impl StrategyContext {
         });
 
         Ok(Some(order_id))
+    }
+
+    fn execute_limit_buy(
+        &mut self,
+        candle: &Candle,
+        price: &BigDecimal,
+        amount: &BigDecimal,
+        fee: &BigDecimal,
+    ) {
+        self.position += amount;
+
+        let trade = Trade {
+            timestamp: candle.timestamp,
+            trade_type: TradeType::LimitBuy,
+            price: price.clone(),
+            amount: amount.clone(),
+            fee: fee.clone(),
+            profit: None,
+        };
+
+        self.trades.push(trade);
+    }
+
+    fn execute_limit_sell(
+        &mut self,
+        candle: &Candle,
+        price: &BigDecimal,
+        amount: &BigDecimal,
+        fee: &BigDecimal,
+    ) {
+        let proceeds = price * amount;
+        self.balance += &proceeds;
+
+        let trade = Trade {
+            timestamp: candle.timestamp,
+            trade_type: TradeType::LimitSell,
+            price: price.clone(),
+            amount: amount.clone(),
+            fee: fee.clone(),
+            profit: None,
+        };
+
+        self.trades.push(trade);
     }
 }

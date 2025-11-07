@@ -1,10 +1,10 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Play, Clock, CheckCircle, XCircle, Loader, TrendingUp, TrendingDown } from 'lucide-react'
+import { Play, Clock, CheckCircle, XCircle, Loader, TrendingUp, TrendingDown, X } from 'lucide-react'
 import { api } from '@/services/api'
 import { useBacktestStream } from '@/hooks/useBacktestStream'
 import ComboBox from '@/components/ComboBox'
 import CandlestickChart from '@/components/CandlestickChart'
-import { formatTimestamp } from '@/utils/time'
+import BacktestResult from '@/components/BacktestResult'
 import type { Timeframe, BacktestTask, AvailableCandleInfo, Candle, Trade } from '@/types'
 import type { CandlestickData, SeriesMarker, Time } from 'lightweight-charts'
 
@@ -24,6 +24,7 @@ export default function Backtest() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [loadedChartTaskId, setLoadedChartTaskId] = useState<string | null>(null)
   const loadingChartRef = useRef(false)
+  const [showResultView, setShowResultView] = useState(false)
 
   const { tasks, connected } = useBacktestStream()
 
@@ -152,10 +153,10 @@ export default function Backtest() {
   }, [])
 
   useEffect(() => {
-    const completedTasks = tasks.filter(task => task.status === 'completed' && task.result)
+    const completedTasks = tasks.filter(task => task.status === 'completed' && task.statistic)
     if (completedTasks.length > 0) {
       const latestTask = completedTasks[completedTasks.length - 1]
-      if (latestTask.result && !selectedTaskId) {
+      if (latestTask.statistic && !selectedTaskId) {
         setSelectedTaskId(latestTask.id)
       }
     }
@@ -164,13 +165,20 @@ export default function Backtest() {
   useEffect(() => {
     if (selectedTaskId && selectedTaskId !== loadedChartTaskId && !loadingChartRef.current) {
       const task = tasks.find(t => t.id === selectedTaskId)
-      if (task && task.status === 'completed' && task.result) {
-        const markers = convertTradesToMarkers(task.result.trades)
+      if (task && task.status === 'completed' && task.statistic) {
+        const markers = convertTradesToMarkers(task.statistic.trades)
         setTradeMarkers(markers)
         loadChartForTask(task)
       }
     }
   }, [selectedTaskId, loadedChartTaskId, loadChartForTask])
+
+  const handleTaskClick = (task: BacktestTask) => {
+    if (task.status === 'completed' && task.statistic) {
+      setSelectedTaskId(task.id)
+      setShowResultView(true)
+    }
+  }
 
   const getTaskStatusIcon = (task: BacktestTask) => {
     switch (task.status) {
@@ -263,78 +271,6 @@ export default function Backtest() {
                 </div>
               </div>
 
-              {chartData.length > 0 && (
-                <>
-                  <div className="bg-white rounded-xl border border-gray-200 p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <h2 className="text-lg font-medium text-gray-900">Chart</h2>
-                    </div>
-                    <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-                      <CandlestickChart data={chartData} markers={tradeMarkers} />
-                    </div>
-                  </div>
-
-                  {tasks.find(t => t.status === 'completed' && t.id === selectedTaskId)?.result && (
-                    <div className="bg-white rounded-xl border border-gray-200 p-6">
-                      <h2 className="text-lg font-medium text-gray-900 mb-4">Trade History</h2>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="border-b border-gray-200">
-                              <th className="text-left py-3 px-4 font-medium text-gray-700">Time</th>
-                              <th className="text-left py-3 px-4 font-medium text-gray-700">Type</th>
-                              <th className="text-right py-3 px-4 font-medium text-gray-700">Price</th>
-                              <th className="text-right py-3 px-4 font-medium text-gray-700">Amount</th>
-                              <th className="text-right py-3 px-4 font-medium text-gray-700">Fee</th>
-                              <th className="text-right py-3 px-4 font-medium text-gray-700">Total</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {tasks.find(t => t.id === selectedTaskId)?.result?.trades.map((trade, idx) => {
-                              const isBuy = trade.trade_type === 'market_buy' || trade.trade_type === 'limit_buy'
-                              const isLimit = trade.trade_type === 'limit_buy' || trade.trade_type === 'limit_sell'
-                              const total = Number(trade.price) * Number(trade.amount) + (isBuy ? Number(trade.fee) : -Number(trade.fee))
-
-                              return (
-                                <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                                  <td className="py-3 px-4 text-gray-600">
-                                    {formatTimestamp(trade.timestamp)}
-                                  </td>
-                                  <td className="py-3 px-4">
-                                    <div className="flex items-center gap-1">
-                                      <span className={`text-xs font-medium px-2 py-1 rounded ${isBuy ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                                        }`}>
-                                        {isBuy ? 'BUY' : 'SELL'}
-                                      </span>
-                                      {isLimit && (
-                                        <span className="text-xs text-gray-500 px-2 py-1 bg-gray-100 rounded">
-                                          LIMIT
-                                        </span>
-                                      )}
-                                    </div>
-                                  </td>
-                                  <td className="py-3 px-4 text-right text-gray-900 font-mono">
-                                    {trade.price}
-                                  </td>
-                                  <td className="py-3 px-4 text-right text-gray-900 font-mono">
-                                    {trade.amount}
-                                  </td>
-                                  <td className="py-3 px-4 text-right text-gray-500 font-mono">
-                                    {trade.fee}
-                                  </td>
-                                  <td className="py-3 px-4 text-right text-gray-900 font-mono font-medium">
-                                    {total}
-                                  </td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
 
             </div>
 
@@ -357,7 +293,7 @@ export default function Backtest() {
                     tasks.map((task) => (
                       <button
                         key={task.id}
-                        onClick={() => task.status === 'completed' && setSelectedTaskId(task.id)}
+                        onClick={() => handleTaskClick(task)}
                         className={`w-full text-left p-3 border rounded-lg transition-colors ${selectedTaskId === task.id
                           ? 'border-gray-900 bg-gray-50'
                           : 'border-gray-200 hover:border-gray-300'
@@ -390,28 +326,32 @@ export default function Backtest() {
                           </div>
                         )}
 
-                        {task.status === 'completed' && task.result && (
+                        {task.status === 'completed' && task.statistic && (
                           <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
                             <div className="flex items-center justify-between text-xs">
-                              <span className="text-gray-500">Final Balance</span>
-                              <span className="font-medium text-gray-900">{task.result.final_balance}</span>
+                              <span className="text-gray-500">Net Profit</span>
+                              <span className={`font-medium ${Number(task.statistic.net_profit) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {Number(task.statistic.net_profit).toFixed(2)}
+                              </span>
                             </div>
                             <div className="flex items-center justify-between text-xs">
-                              <span className="text-gray-500">Position</span>
-                              <span className="font-medium text-gray-900">{task.result.final_position}</span>
+                              <span className="text-gray-500">Return</span>
+                              <span className={`font-medium ${task.statistic.return_percent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {task.statistic.return_percent >= 0 ? '+' : ''}{task.statistic.return_percent.toFixed(2)}%
+                              </span>
                             </div>
                             <div className="flex items-center justify-between text-xs">
-                              <span className="text-gray-500">Trades</span>
-                              <span className="font-medium text-gray-900">{task.result.trades.length}</span>
+                              <span className="text-gray-500">Win Rate</span>
+                              <span className="font-medium text-gray-900">{task.statistic.win_rate.toFixed(2)}%</span>
                             </div>
                             <div className="flex items-center gap-2 text-xs mt-2">
                               <div className="flex items-center gap-1 text-green-600">
                                 <TrendingUp className="w-3 h-3" />
-                                <span>{task.result.trades.filter(t => t.trade_type === 'market_buy' || t.trade_type === 'limit_buy').length} Buy</span>
+                                <span>{task.statistic.winning_trades} Win</span>
                               </div>
                               <div className="flex items-center gap-1 text-red-600">
                                 <TrendingDown className="w-3 h-3" />
-                                <span>{task.result.trades.filter(t => t.trade_type === 'market_sell' || t.trade_type === 'limit_sell').length} Sell</span>
+                                <span>{task.statistic.losing_trades} Loss</span>
                               </div>
                             </div>
                           </div>
@@ -431,6 +371,50 @@ export default function Backtest() {
           </div>
         </div>
       </div>
+
+      {showResultView && selectedTaskId && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">Backtest Result</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  {tasks.find(t => t.id === selectedTaskId)?.name} · {tasks.find(t => t.id === selectedTaskId)?.symbol}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowResultView(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {chartData.length > 0 && (
+                <div className="mb-6">
+                  <div className="bg-white rounded-xl border border-gray-200 p-6">
+                    <h3 className="text-lg font-medium text-gray-900 mb-4">Chart</h3>
+                    <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+                      <CandlestickChart data={chartData} markers={tradeMarkers} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(() => {
+                const task = tasks.find(t => t.id === selectedTaskId)
+                return task?.statistic && (
+                  <BacktestResult
+                    statistic={task.statistic}
+                    precision={task.precision}
+                  />
+                )
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

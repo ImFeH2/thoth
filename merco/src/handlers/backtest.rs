@@ -37,7 +37,10 @@ pub async fn create_task(
     State(state): State<AppState>,
     Json(request): Json<CreateBacktestTaskRequest>,
 ) -> ApiResult<CreateBacktestTaskResponse> {
-    let strategy_handle = state.strategy_manager.load_strategy(&request.name)?;
+    let mut strategy_handle = state.strategy_manager.load_strategy(&request.name).await?;
+
+    let ccxt = crate::exchange::ccxt::CCXT::with_exchange(&request.exchange)?;
+    let precision = ccxt.precision(&request.symbol)?;
 
     let now = Utc::now();
     let task = BacktestTask {
@@ -48,7 +51,8 @@ pub async fn create_task(
         exchange: request.exchange.clone(),
         symbol: request.symbol.clone(),
         timeframe: request.timeframe,
-        result: None,
+        precision,
+        statistic: None,
         error_message: None,
         created_at: now,
         started_at: None,
@@ -69,7 +73,7 @@ pub async fn create_task(
     let db_pool = state.db_pool.clone();
     tokio::spawn(async move {
         let mut task = task.write().await;
-        task.execute(db_pool, strategy_handle).await;
+        task.execute(db_pool, &mut strategy_handle).await;
     });
 
     Ok(Json(CreateBacktestTaskResponse { task_id }))
