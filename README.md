@@ -26,14 +26,19 @@ git clone https://github.com/ImFeH2/thoth.git
 cd thoth
 
 # 2. Start database (if using Docker)
-cd docker/
+cd docker
 docker compose up -d
 cd ..
 
-# 3. Start backend
+# 3. Run Database Migrations
+cd thoth
+sqlx migrate run
+cd ..
+
+# 4. Start backend
 cargo run --release
 
-# 4. Start frontend (in new terminal)
+# 5. Start frontend (in new terminal)
 cd frontend
 pnpm install
 pnpm dev
