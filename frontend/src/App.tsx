@@ -5,6 +5,7 @@ import MarketData from '@/pages/MarketData'
 import Download from '@/pages/Download'
 import Strategy from '@/pages/Strategy'
 import Backtest from '@/pages/Backtest'
+import Tasks from '@/pages/Tasks'
 import Settings from '@/pages/Settings'
 
 function App() {
@@ -18,6 +19,7 @@ function App() {
         {activeTab === 'download' && <Download />}
         {activeTab === 'strategy' && <Strategy />}
         {activeTab === 'backtest' && <Backtest />}
+        {activeTab === 'tasks' && <Tasks />}
         {activeTab === 'settings' && <Settings />}
       </main>
       <Toaster

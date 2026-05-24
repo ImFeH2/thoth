@@ -1,14 +1,9 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
-import { Play, Clock, CheckCircle, XCircle, Loader, TrendingUp, TrendingDown } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Play } from 'lucide-react'
 import { useAppSettings } from '@/lib/appSettings'
-import CandlestickChart, { type ChartMarkerDetail } from '@/components/CandlestickChart'
 import { api } from '@/services/api'
-import { useBacktestStream } from '@/hooks/useBacktestStream'
 import ComboBox from '@/components/ComboBox'
-import BacktestResult from '@/components/BacktestResult'
-import type { Timeframe, BacktestTask, AvailableCandleInfo, Candle, Trade } from '@/types'
-import type { CandlestickData, HistogramData, SeriesMarker, Time } from 'lightweight-charts'
-import { formatTimestamp } from '@/utils/time'
+import type { Timeframe, AvailableCandleInfo } from '@/types'
 
 export default function Backtest() {
   const settings = useAppSettings()
@@ -19,19 +14,8 @@ export default function Backtest() {
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe | ''>('')
   const [running, setRunning] = useState(false)
   const runningRef = useRef(false)
-  const abortControllerRef = useRef<AbortController | null>(null)
 
   const [availableData, setAvailableData] = useState<AvailableCandleInfo[]>([])
-  const [tradeMarkers, setTradeMarkers] = useState<SeriesMarker<Time>[]>([])
-  const [tradeMarkerDetails, setTradeMarkerDetails] = useState<ChartMarkerDetail[]>([])
-  const [chartData, setChartData] = useState<CandlestickData[]>([])
-  const [volumeData, setVolumeData] = useState<HistogramData<Time>[]>([])
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  const [loadedChartTaskId, setLoadedChartTaskId] = useState<string | null>(null)
-  const [loadingChart, setLoadingChart] = useState(false)
-  const loadingChartRef = useRef(false)
-
-  const { tasks, connected } = useBacktestStream()
 
   const loadStrategies = useCallback(async () => {
     try {
@@ -74,68 +58,23 @@ export default function Backtest() {
     loadStrategies()
   }, [loadAvailableData, loadStrategies])
 
-  const availableExchanges = Array.from(new Set(availableData.map(d => d.exchange)))
+  const availableExchanges = Array.from(new Set(availableData.map((data) => data.exchange)))
 
   const availableSymbols = selectedExchange
     ? Array.from(new Set(
       availableData
-        .filter(d => d.exchange === selectedExchange)
-        .map(d => d.symbol)
+        .filter((data) => data.exchange === selectedExchange)
+        .map((data) => data.symbol)
     ))
     : []
 
   const availableTimeframes = selectedExchange && selectedSymbol
     ? Array.from(new Set(
       availableData
-        .filter(d => d.exchange === selectedExchange && d.symbol === selectedSymbol)
-        .map(d => d.timeframe)
+        .filter((data) => data.exchange === selectedExchange && data.symbol === selectedSymbol)
+        .map((data) => data.timeframe)
     ))
     : []
-
-  const convertTradesToMarkers = (trades: Trade[]) => {
-    const markers: SeriesMarker<Time>[] = []
-    const details: ChartMarkerDetail[] = []
-
-    trades.forEach((trade, index) => {
-      const isBuy = trade.trade_type === 'market_buy' || trade.trade_type === 'limit_buy'
-      const isLimit = trade.trade_type === 'limit_buy' || trade.trade_type === 'limit_sell'
-      const markerId = `${trade.timestamp}-${trade.trade_type}-${index}`
-
-      markers.push({
-        id: markerId,
-        time: (trade.timestamp / 1000) as Time,
-        position: isBuy ? 'belowBar' : 'aboveBar',
-        color: isBuy ? '#26a69a' : '#ef5350',
-        shape: isBuy ? 'arrowUp' : 'arrowDown',
-        text: `${isLimit ? 'LIMIT' : 'MARKET'} ${isBuy ? 'BUY' : 'SELL'} ${trade.amount} @ ${trade.price}`,
-      })
-
-      const profitValue = trade.profit ? Number(trade.profit) : null
-
-      details.push({
-        id: markerId,
-        title: `${isLimit ? 'Limit' : 'Market'} ${isBuy ? 'Buy' : 'Sell'}`,
-        accentColor: isBuy ? '#26a69a' : '#ef5350',
-        fields: [
-          { label: 'Time', value: formatTimestamp(trade.timestamp) },
-          { label: 'Price', value: trade.price },
-          { label: 'Amount', value: trade.amount },
-          { label: 'Fee', value: trade.fee },
-          {
-            label: 'Profit',
-            value: profitValue === null || Number.isNaN(profitValue)
-              ? 'N/A'
-              : profitValue.toFixed(2),
-          },
-        ],
-      })
-    })
-
-    return {
-      markers,
-      details,
-    }
-  }
 
   const handleRunBacktest = useCallback(async (e?: React.MouseEvent) => {
     if (e) {
@@ -145,12 +84,6 @@ export default function Backtest() {
 
     if (!selectedStrategy || !selectedSymbol || !selectedTimeframe) return
     if (runningRef.current) return
-
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-    }
-
-    abortControllerRef.current = new AbortController()
 
     try {
       runningRef.current = true
@@ -166,98 +99,10 @@ export default function Backtest() {
     } finally {
       runningRef.current = false
       setRunning(false)
-      abortControllerRef.current = null
     }
   }, [selectedStrategy, selectedExchange, selectedSymbol, selectedTimeframe])
 
-  const loadChartForTask = useCallback(async (task: BacktestTask) => {
-    if (loadingChartRef.current) return
-
-    loadingChartRef.current = true
-    setLoadingChart(true)
-    try {
-      const candles = await api.candles.get({
-        exchange: task.exchange,
-        symbol: task.symbol,
-        timeframe: task.timeframe,
-      })
-      const chartData: CandlestickData[] = candles.map((candle: Candle) => ({
-        time: (candle.timestamp / 1000) as Time,
-        open: Number(candle.open),
-        high: Number(candle.high),
-        low: Number(candle.low),
-        close: Number(candle.close),
-      }))
-      const volumeData: HistogramData<Time>[] = candles.map((candle: Candle) => {
-        const open = Number(candle.open)
-        const close = Number(candle.close)
-
-        return {
-          time: (candle.timestamp / 1000) as Time,
-          value: Number(candle.volume),
-          color: close >= open ? '#86efac' : '#fca5a5',
-        }
-      })
-      setChartData(chartData)
-      setVolumeData(volumeData)
-      setLoadedChartTaskId(task.id)
-    } catch (error) {
-      console.error('Failed to load chart data:', error)
-    } finally {
-      loadingChartRef.current = false
-      setLoadingChart(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    const completedTasks = tasks.filter(task => task.status === 'completed' && task.statistic)
-    if (completedTasks.length > 0) {
-      const latestTask = completedTasks[completedTasks.length - 1]
-      if (latestTask.statistic && !selectedTaskId) {
-        setSelectedTaskId(latestTask.id)
-      }
-    }
-  }, [tasks, selectedTaskId])
-
-  useEffect(() => {
-    if (selectedTaskId && selectedTaskId !== loadedChartTaskId && !loadingChartRef.current) {
-        const task = tasks.find(t => t.id === selectedTaskId)
-      if (task && task.status === 'completed' && task.statistic) {
-        const markerData = convertTradesToMarkers(task.statistic.trades)
-        setChartData([])
-        setVolumeData([])
-        setTradeMarkers(markerData.markers)
-        setTradeMarkerDetails(markerData.details)
-        loadChartForTask(task)
-      }
-    }
-  }, [selectedTaskId, loadedChartTaskId, loadChartForTask, tasks])
-
-  const handleTaskClick = (task: BacktestTask) => {
-    if (task.status === 'completed' && task.statistic) {
-      setSelectedTaskId(task.id)
-    }
-  }
-
-  const getTaskStatusIcon = (task: BacktestTask) => {
-    switch (task.status) {
-      case 'pending':
-        return <Clock className="w-4 h-4 text-gray-400" />
-      case 'compiling':
-        return <Loader className="w-4 h-4 text-yellow-500 animate-spin" />
-      case 'running':
-        return <Loader className="w-4 h-4 text-blue-500 animate-spin" />
-      case 'completed':
-        return <CheckCircle className="w-4 h-4 text-green-500" />
-      case 'failed':
-        return <XCircle className="w-4 h-4 text-red-500" />
-    }
-  }
-
   const canRunBacktest = selectedStrategy && selectedSymbol && selectedTimeframe && !running
-  const selectedResultTask = selectedTaskId
-    ? tasks.find((task) => task.id === selectedTaskId && task.status === 'completed' && task.statistic) ?? null
-    : null
 
   return (
     <div className="h-full flex flex-col">
@@ -268,206 +113,70 @@ export default function Backtest() {
             <p className="text-gray-500">Test your trading strategies against historical data</p>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
-              <div className="bg-white rounded-xl border border-gray-200 p-6">
-                <h2 className="text-lg font-medium text-gray-900 mb-4">Configuration</h2>
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-medium text-gray-900 mb-4">Configuration</h2>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Strategy
-                    </label>
-                    <ComboBox
-                      options={strategies}
-                      value={selectedStrategy}
-                      onChange={setSelectedStrategy}
-                      placeholder="Select strategy..."
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Exchange
-                    </label>
-                    <ComboBox
-                      options={availableExchanges}
-                      value={selectedExchange}
-                      onChange={setSelectedExchange}
-                      placeholder="Select exchange..."
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Symbol
-                    </label>
-                    <ComboBox
-                      options={availableSymbols}
-                      value={selectedSymbol}
-                      onChange={setSelectedSymbol}
-                      placeholder="Select symbol..."
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Timeframe
-                    </label>
-                    <ComboBox
-                      options={availableTimeframes}
-                      value={selectedTimeframe}
-                      onChange={(value) => setSelectedTimeframe(value as Timeframe)}
-                      placeholder="Select timeframe..."
-                    />
-                  </div>
-                </div>
-
-                <div className="mt-6">
-                  <button
-                    onClick={handleRunBacktest}
-                    disabled={!canRunBacktest}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    <Play className="w-4 h-4" />
-                    {running ? 'Running Backtest...' : 'Run Backtest'}
-                  </button>
-                </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Strategy
+                </label>
+                <ComboBox
+                  options={strategies}
+                  value={selectedStrategy}
+                  onChange={setSelectedStrategy}
+                  placeholder="Select strategy..."
+                />
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Exchange
+                </label>
+                <ComboBox
+                  options={availableExchanges}
+                  value={selectedExchange}
+                  onChange={setSelectedExchange}
+                  placeholder="Select exchange..."
+                />
+              </div>
 
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Symbol
+                </label>
+                <ComboBox
+                  options={availableSymbols}
+                  value={selectedSymbol}
+                  onChange={setSelectedSymbol}
+                  placeholder="Select symbol..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Timeframe
+                </label>
+                <ComboBox
+                  options={availableTimeframes}
+                  value={selectedTimeframe}
+                  onChange={(value) => setSelectedTimeframe(value as Timeframe)}
+                  placeholder="Select timeframe..."
+                />
+              </div>
             </div>
 
-            <div className="space-y-6">
-              <div className="bg-white rounded-xl border border-gray-200 p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-medium text-gray-900">Backtest Tasks</h2>
-                  <div className={`flex items-center gap-2 text-xs ${connected ? 'text-green-600' : 'text-gray-400'}`}>
-                    <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-300'}`} />
-                    {connected ? 'Connected' : 'Disconnected'}
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  {tasks.length === 0 ? (
-                    <p className="text-sm text-gray-400 text-center py-8">
-                      No backtest tasks yet
-                    </p>
-                  ) : (
-                    tasks.map((task) => (
-                      <button
-                        key={task.id}
-                        onClick={() => handleTaskClick(task)}
-                        className={`w-full text-left p-3 border rounded-lg transition-colors ${selectedTaskId === task.id
-                          ? 'border-gray-900 bg-gray-50'
-                          : 'border-gray-200 hover:border-gray-300'
-                          } ${task.status === 'completed' ? 'cursor-pointer' : 'cursor-default'}`}
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900 truncate">
-                              {task.name}
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              {task.symbol} · {task.exchange} · {task.timeframe}
-                            </p>
-                          </div>
-                          {getTaskStatusIcon(task)}
-                        </div>
-
-                        {task.status === 'compiling' && (
-                          <div className="mt-2">
-                            <p className="text-xs text-yellow-600">Compiling strategy...</p>
-                          </div>
-                        )}
-
-                        {task.status === 'running' && (
-                          <div className="mt-2">
-                            <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
-                              <span>Progress</span>
-                              <span>{Math.round(task.progress)}%</span>
-                            </div>
-                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-blue-500 transition-all duration-300"
-                                style={{ width: `${task.progress}%` }}
-                              />
-                            </div>
-                          </div>
-                        )}
-
-                        {task.status === 'completed' && task.statistic && (
-                          <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-gray-500">Net Profit</span>
-                              <span className={`font-medium ${Number(task.statistic.net_profit) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                {Number(task.statistic.net_profit).toFixed(2)}
-                              </span>
-                            </div>
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-gray-500">Return</span>
-                              <span className={`font-medium ${task.statistic.return_percent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                {task.statistic.return_percent >= 0 ? '+' : ''}{task.statistic.return_percent.toFixed(2)}%
-                              </span>
-                            </div>
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-gray-500">Win Rate</span>
-                              <span className="font-medium text-gray-900">{task.statistic.win_rate.toFixed(2)}%</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-xs mt-2">
-                              <div className="flex items-center gap-1 text-green-600">
-                                <TrendingUp className="w-3 h-3" />
-                                <span>{task.statistic.winning_trades} Win</span>
-                              </div>
-                              <div className="flex items-center gap-1 text-red-600">
-                                <TrendingDown className="w-3 h-3" />
-                                <span>{task.statistic.losing_trades} Loss</span>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        {task.status === 'failed' && task.error_message && (
-                          <div className="mt-2">
-                            <p className="text-xs text-red-600">{task.error_message}</p>
-                          </div>
-                        )}
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
+            <div className="mt-6">
+              <button
+                onClick={handleRunBacktest}
+                disabled={!canRunBacktest}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <Play className="w-4 h-4" />
+                {running ? 'Running Backtest...' : 'Run Backtest'}
+              </button>
             </div>
           </div>
-
-          {selectedResultTask?.statistic && (
-            <div className="mt-6 space-y-6">
-              <div className="bg-white rounded-xl border border-gray-200 p-6">
-                <div className="mb-4">
-                  <h2 className="text-xl font-semibold text-gray-900">Backtest Result</h2>
-                  <p className="text-sm text-gray-500 mt-1">
-                    {selectedResultTask.name} · {selectedResultTask.symbol} · {selectedResultTask.exchange} · {selectedResultTask.timeframe}
-                  </p>
-                </div>
-
-                <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-                  <CandlestickChart
-                    data={chartData}
-                    volumeData={volumeData}
-                    symbol={`${selectedResultTask.symbol} (${selectedResultTask.exchange} - ${selectedResultTask.timeframe})`}
-                    markers={tradeMarkers}
-                    markerDetails={tradeMarkerDetails}
-                    loading={loadingChart}
-                  />
-                </div>
-              </div>
-
-              <BacktestResult
-                statistic={selectedResultTask.statistic}
-                precision={selectedResultTask.precision}
-              />
-            </div>
-          )}
         </div>
       </div>
     </div>

@@ -10,6 +10,7 @@ const tabs = [
   { id: 'download', label: 'Download' },
   { id: 'strategy', label: 'Strategy' },
   { id: 'backtest', label: 'Backtest' },
+  { id: 'tasks', label: 'Tasks' },
   { id: 'settings', label: 'Settings' },
 ]
 
