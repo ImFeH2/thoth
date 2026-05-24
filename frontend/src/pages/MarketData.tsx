@@ -142,7 +142,7 @@ export default function MarketData() {
           </div>
         </aside>
 
-        <section className="min-h-[540px] min-w-0 flex-1 p-4 lg:min-h-0">
+        <section className="min-h-[540px] min-w-0 flex-1 lg:min-h-0">
           {selectedData ? (
             <CandlestickChart
               data={chartData}
@@ -152,11 +152,12 @@ export default function MarketData() {
               timeframeOptions={chartTimeframes}
               activeTimeframe={selectedData.timeframe}
               onTimeframeChange={handleChartTimeframeChange}
+              frameless
               className="h-full"
               surfaceClassName="min-h-[420px] flex-1"
             />
           ) : (
-            <div className="flex h-full flex-col rounded-xl border border-gray-200 bg-white p-6">
+            <div className="flex h-full flex-col bg-white p-6">
               <div className="flex flex-1 flex-col items-center justify-center text-center">
                 <BarChart3 className="w-12 h-12 text-gray-300 mb-3" />
                 <p className="text-sm font-medium text-gray-900 mb-1">No Data Available</p>

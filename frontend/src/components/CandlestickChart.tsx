@@ -9,6 +9,7 @@ interface CandlestickChartProps {
   data: CandlestickData[]
   volumeData?: HistogramData<Time>[]
   symbol?: string
+  frameless?: boolean
   className?: string
   surfaceClassName?: string
   markers?: SeriesMarker<Time>[]
@@ -153,6 +154,7 @@ export default function CandlestickChart({
   data,
   volumeData = [],
   symbol,
+  frameless = false,
   className = '',
   surfaceClassName,
   markers,
@@ -796,9 +798,9 @@ export default function CandlestickChart({
   return (
     <div
       ref={fullscreenContainerRef}
-      className={`bg-white border border-gray-200 p-6 overflow-hidden flex flex-col ${isFullscreen
+      className={`bg-white p-6 overflow-hidden flex flex-col ${isFullscreen
         ? 'h-full w-full rounded-none border-0 p-4 sm:p-6'
-        : `rounded-xl ${className}`
+        : `${frameless ? '' : 'border border-gray-200 rounded-xl'} ${className}`
         }`}
     >
       {(symbol || controls || timeframeOptions.length > 1 || data.length > 0) && (
