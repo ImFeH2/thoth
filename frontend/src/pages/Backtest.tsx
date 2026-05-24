@@ -5,7 +5,11 @@ import { api } from '@/services/api'
 import ComboBox from '@/components/ComboBox'
 import type { Timeframe, AvailableCandleInfo } from '@/types'
 
-export default function Backtest() {
+interface BacktestProps {
+  onTaskCreated?: () => void
+}
+
+export default function Backtest({ onTaskCreated }: BacktestProps) {
   const settings = useAppSettings()
   const [strategies, setStrategies] = useState<string[]>([])
   const [selectedStrategy, setSelectedStrategy] = useState<string>('')
@@ -94,13 +98,14 @@ export default function Backtest() {
         symbol: selectedSymbol,
         timeframe: selectedTimeframe,
       })
+      onTaskCreated?.()
     } catch (error) {
       console.error('Failed to run backtest:', error)
     } finally {
       runningRef.current = false
       setRunning(false)
     }
-  }, [selectedStrategy, selectedExchange, selectedSymbol, selectedTimeframe])
+  }, [onTaskCreated, selectedStrategy, selectedExchange, selectedSymbol, selectedTimeframe])
 
   const canRunBacktest = selectedStrategy && selectedSymbol && selectedTimeframe && !running
 

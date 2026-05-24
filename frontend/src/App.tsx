@@ -18,7 +18,7 @@ function App() {
         {activeTab === 'market' && <MarketData />}
         {activeTab === 'download' && <Download />}
         {activeTab === 'strategy' && <Strategy />}
-        {activeTab === 'backtest' && <Backtest />}
+        {activeTab === 'backtest' && <Backtest onTaskCreated={() => setActiveTab('tasks')} />}
         {activeTab === 'tasks' && <Tasks />}
         {activeTab === 'settings' && <Settings />}
       </main>
