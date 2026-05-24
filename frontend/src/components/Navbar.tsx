@@ -7,6 +7,7 @@ interface NavbarProps {
 
 const tabs = [
   { id: 'market', label: 'Market Data' },
+  { id: 'download', label: 'Download' },
   { id: 'strategy', label: 'Strategy' },
   { id: 'backtest', label: 'Backtest' },
   { id: 'settings', label: 'Settings' },

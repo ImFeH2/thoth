@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Toaster } from 'sonner'
 import Navbar from '@/components/Navbar'
 import MarketData from '@/pages/MarketData'
+import Download from '@/pages/Download'
 import Strategy from '@/pages/Strategy'
 import Backtest from '@/pages/Backtest'
 import Settings from '@/pages/Settings'
@@ -14,6 +15,7 @@ function App() {
       <Navbar activeTab={activeTab} onTabChange={setActiveTab} />
       <main className="flex-1 overflow-hidden">
         {activeTab === 'market' && <MarketData />}
+        {activeTab === 'download' && <Download />}
         {activeTab === 'strategy' && <Strategy />}
         {activeTab === 'backtest' && <Backtest />}
         {activeTab === 'settings' && <Settings />}
