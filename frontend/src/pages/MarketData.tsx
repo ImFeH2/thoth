@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BarChart3 } from 'lucide-react'
+import { BarChart3, Loader2 } from 'lucide-react'
 import { TIMEFRAME_OPTIONS, useAppSettings } from '@/lib/appSettings'
 import { api } from '@/services/api'
 import CandlestickChart from '@/components/CandlestickChart'
@@ -11,6 +11,7 @@ export default function MarketData() {
   const [availableData, setAvailableData] = useState<AvailableCandleInfo[]>([])
   const [chartData, setChartData] = useState<CandlestickData[]>([])
   const [volumeData, setVolumeData] = useState<HistogramData<Time>[]>([])
+  const [loadingAvailableData, setLoadingAvailableData] = useState(true)
   const [loadingChart, setLoadingChart] = useState(false)
   const [selectedData, setSelectedData] = useState<AvailableCandleInfo | null>(null)
 
@@ -56,6 +57,7 @@ export default function MarketData() {
 
   const loadAvailableData = useCallback(async () => {
     try {
+      setLoadingAvailableData(true)
       const data = await api.candles.available()
       setAvailableData(data)
       if (data.length > 0 && !selectedData) {
@@ -68,6 +70,8 @@ export default function MarketData() {
       }
     } catch (error) {
       console.error('Failed to load available data:', error)
+    } finally {
+      setLoadingAvailableData(false)
     }
   }, [loadChartData, selectedData, settings.defaults.exchange, settings.defaults.symbol, settings.defaults.timeframe])
 
@@ -108,7 +112,12 @@ export default function MarketData() {
           <div className="flex h-full min-h-0 flex-col p-4">
             <h2 className="mb-4 text-sm font-medium text-gray-900">Available Data</h2>
             <div className="max-h-72 min-h-0 overflow-y-auto lg:max-h-none lg:flex-1">
-              {availableData.length === 0 ? (
+              {loadingAvailableData ? (
+                <div className="flex flex-col items-center justify-center py-8 text-center">
+                  <Loader2 className="w-5 h-5 text-gray-400 animate-spin mb-3" />
+                  <p className="text-sm text-gray-500">Loading data...</p>
+                </div>
+              ) : availableData.length === 0 ? (
                 <div className="text-center py-8">
                   <p className="text-sm text-gray-500">No data available</p>
                 </div>
@@ -159,9 +168,19 @@ export default function MarketData() {
           ) : (
             <div className="flex h-full flex-col bg-white p-6">
               <div className="flex flex-1 flex-col items-center justify-center text-center">
-                <BarChart3 className="w-12 h-12 text-gray-300 mb-3" />
-                <p className="text-sm font-medium text-gray-900 mb-1">No Data Available</p>
-                <p className="text-sm text-gray-500">Use Download to add market data</p>
+                {loadingAvailableData ? (
+                  <>
+                    <Loader2 className="w-8 h-8 text-gray-400 animate-spin mb-3" />
+                    <p className="text-sm font-medium text-gray-900 mb-1">Loading Market Data</p>
+                    <p className="text-sm text-gray-500">Preparing available data</p>
+                  </>
+                ) : (
+                  <>
+                    <BarChart3 className="w-12 h-12 text-gray-300 mb-3" />
+                    <p className="text-sm font-medium text-gray-900 mb-1">No Data Available</p>
+                    <p className="text-sm text-gray-500">Use Download to add market data</p>
+                  </>
+                )}
               </div>
             </div>
           )}
